@@ -1,62 +1,64 @@
-import cv2, json, numpy as np
+"""
+authentication.py (updated)
+============================
+Face authentication using SQLite database.
+"""
+
+import cv2
+import numpy as np
 import face_recognition
-from utils.key_manager import get_cipher
-from utils.logger import log
-import os
-
-THRESHOLD    = 0.45
-PROFILES_DIR = "profiles"
-
-def load_embedding(username: str) -> np.ndarray:
-    cipher   = get_cipher()
-    enc_path = os.path.join(PROFILES_DIR, f"{username}.enc")
-
-    if not os.path.exists(enc_path):
-        raise FileNotFoundError(f"No profile found for '{username}'. Enroll first.")
-
-    with open(enc_path, "rb") as f:
-        decrypted = cipher.decrypt(f.read())
-
-    return np.array(json.loads(decrypted)["embedding"])
+from modules.database import DatabaseManager
 
 
-def authenticate_from_frame(username: str, frame_bgr) -> dict:
+def authenticate_from_frame(username: str, frame_bgr, db: DatabaseManager = None) -> dict:
     """
-    Authenticate a user from a single captured frame.
-    Called by Streamlit after st.camera_input() captures the image.
-    Returns: {"success": bool, "message": str, "distance": float}
+    Authenticate a user from a captured frame.
+    Loads embedding from SQLite, decrypts it, compares with live face.
     """
-    try:
-        known = load_embedding(username)
-    except FileNotFoundError as e:
-        return {"success": False, "message": str(e), "distance": None}
+    if db is None:
+        db = DatabaseManager()
 
-    log("AUTH_ATTEMPT", user=username)
+    threshold = db.get_threshold(default=0.45)
+
+    known = db.get_embedding(username)
+    if known is None:
+        return {
+            "success"   : False,
+            "message"   : f"No profile found for '{username}'. Enroll first.",
+            "distance"  : None,
+            "confidence": None,
+        }
+
+    db.log_event(username, "AUTH_ATTEMPT")
 
     rgb       = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     locations = face_recognition.face_locations(rgb)
     encodings = face_recognition.face_encodings(rgb, locations)
 
     if not encodings:
-        log("AUTH_RESULT", user=username, success=False)
+        db.log_event(username, "AUTH_FAILED_NO_FACE", success=False)
         return {
-            "success"  : False,
-            "message"  : "No face detected in frame. Try again.",
-            "distance" : None
+            "success"   : False,
+            "message"   : "No face detected. Please try again.",
+            "distance"  : None,
+            "confidence": None,
         }
 
     distance = face_recognition.face_distance([known], encodings[0])[0]
-    success  = distance < THRESHOLD
+    success  = bool(distance < threshold)
 
-    log("AUTH_RESULT", user=username, success=success)
+    db.log_event(username, "AUTH_RESULT", success=success)
 
     return {
-        "success" : success,
-        "message" : "Access Granted ✅" if success else "Access Denied ❌",
-        "distance": round(float(distance), 4),
-        "confidence": f"{round((1 - distance) * 100, 1)}%"
+        "success"   : success,
+        "message"   : "Access Granted" if success else "Access Denied",
+        "distance"  : round(float(distance), 4),
+        "confidence": f"{round((1 - distance) * 100, 1)}%",
     }
 
-def is_enrolled(username: str) -> bool:
-    """Quick check if a user profile exists."""
-    return os.path.exists(os.path.join(PROFILES_DIR, f"{username}.enc"))
+
+def is_enrolled(username: str, db: DatabaseManager = None) -> bool:
+    """Quick check if a user has an embedding in the database."""
+    if db is None:
+        db = DatabaseManager()
+    return db.is_enrolled(username)
