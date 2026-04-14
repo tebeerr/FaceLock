@@ -6,7 +6,7 @@
 **Local face recognition that locks and unlocks your Windows session — privately, securely, and entirely on-device.**
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
-![Streamlit](https://img.shields.io/badge/UI-Streamlit-red?logo=streamlit)
+![CLI](https://img.shields.io/badge/Interface-CLI-black?logo=windowsterminal)
 ![SQLite](https://img.shields.io/badge/Database-SQLite-lightblue?logo=sqlite)
 ![AES-256](https://img.shields.io/badge/Encryption-AES--256-green?logo=letsencrypt)
 ![GDPR](https://img.shields.io/badge/Compliance-GDPR-orange)
@@ -20,7 +20,7 @@
 
 FaceLock is a Python application that replaces traditional password-based screen locking with real-time facial recognition. It runs locally on your Windows machine — no cloud, no external servers, no raw image storage.
 
-Face embeddings are extracted, encrypted with AES-256, and stored in a local SQLite database. A background service continuously monitors inactivity and automatically locks the session when the user steps away.
+Face embeddings are extracted, encrypted with AES-256, and stored in a local SQLite database. A **guardian loop** continuously monitors the webcam and automatically locks the session when the enrolled user is no longer detected — or when an unrecognized face appears.
 
 > Inspired by privacy-first research initiatives such as **FACEOFF** and **Keyless**, FaceLock is built with **Privacy by Design** principles from the ground up.
 
@@ -41,17 +41,20 @@ Face embeddings are extracted, encrypted with AES-256, and stored in a local SQL
                     └──────────────────┘     └─────────────────────┘
 ```
 
-### 1 · Enrollment
-The user captures their face via webcam. FaceLock extracts a **128-dimensional face embedding**, encrypts it with **AES-256 (Fernet)**, and stores it in a local SQLite database. No raw images are ever saved.
+### 1 · Enrollment (`enroll.py`)
+The user captures their face via webcam. FaceLock extracts **5 frames** (configurable), averages them into a single **128-dimensional face embedding**, encrypts it with **AES-256 (Fernet)**, and stores it in a local SQLite database. No raw images are ever saved.
 
-### 2 · Auto-Lock
-A **background service** runs silently and monitors keyboard/mouse inactivity via the Windows `GetLastInputInfo` API. When the idle time exceeds the configured threshold *(default: 60 seconds)*, the session is locked automatically.
+### 2 · Guardian Loop (`facelock.py`)
+The core of the system. A real-time webcam loop monitors who is sitting at the computer:
+- **No face detected** for 5 seconds → session locks automatically
+- **Wrong face detected** for 30 consecutive frames → session locks immediately
+- **Correct face detected** → session stays active with a live confidence overlay
 
-### 3 · Authentication
-To unlock, the user presents their face to the camera. FaceLock extracts a live embedding, decrypts the stored one, and computes the **cosine distance** between them. If the distance is below the threshold *(default: 0.45)*, access is granted.
+### 3 · Authentication (`authenticate.py`)
+To verify identity (e.g., after unlocking), the user presents their face. FaceLock requires **10 consecutive matching frames** before confirming identity — preventing spoofing from a single lucky frame.
 
 ### 4 · Audit Logging
-Every event — enrollment, authentication attempt, lock, and unlock — is recorded in the SQLite database with timestamps for full traceability.
+Every event — enrollment, authentication attempt, guardian start/stop, and lock — is recorded in the SQLite database with timestamps for full traceability.
 
 ---
 
@@ -61,12 +64,12 @@ Every event — enrollment, authentication attempt, lock, and unlock — is reco
 |---|---|
 | 🔒 **AES-256 Encryption** | All face embeddings are encrypted before being written to disk |
 | 🗄️ **SQLite Database** | Users, embeddings, and logs stored in a single local file |
-| ⚙️ **Background Service** | Auto-locks Windows session after configurable inactivity timeout |
+| 👁️ **Guardian Loop** | Real-time webcam monitoring — locks on absence or unrecognized face |
 | 🛡️ **GDPR Compliant** | No images stored, right to erasure, 100% local processing |
-| 🎯 **Adjustable Threshold** | Tune recognition strictness from the Settings page |
-| 👥 **User Management** | Enroll, authenticate, and delete users through the UI |
+| 🎯 **Adjustable Threshold** | Tune recognition strictness via `config.py` |
+| 👥 **Multi-User Support** | Enroll, authenticate, and delete users via CLI |
 | 📜 **Audit Trail** | Timestamped event log for every authentication action |
-| 🖥️ **Streamlit UI** | Clean web dashboard accessible at `localhost:8501` |
+| 🖥️ **CLI + Batch Launcher** | Lightweight command-line interface with `run.bat` for quick access |
 
 ---
 
@@ -74,16 +77,17 @@ Every event — enrollment, authentication attempt, lock, and unlock — is reco
 
 ```
 FaceLock/
-├── app.py                    # Streamlit web UI (entry point)
-├── authentication.py         # Face verification logic
-├── enrollment.py             # Face enrollment logic
-├── config.py                 # Centralized settings
+├── facelock.py               # Guardian loop — real-time webcam monitor (entry point)
+├── enroll.py                 # Face enrollment script
+├── authenticate.py           # Face authentication script
+├── config.py                 # Centralized settings (thresholds, timeouts, paths)
+├── run.bat                   # Windows batch launcher
 ├── requirements.txt
 │
 ├── modules/
 │   ├── __init__.py
 │   ├── database.py           # SQLite + AES-256 encryption layer
-│   └── system_controller.py  # Background inactivity monitor + auto-lock
+│   └── system_controller.py  # Inactivity monitor + session lock via Windows API
 │
 ├── data/                     # Auto-created on first launch
 │   ├── facelock.db           # Encrypted SQLite database
@@ -103,7 +107,7 @@ FaceLock is designed around the principle that **biometric data should never lea
 | Art. 5(1)(c) | Data Minimisation | Only 128D embeddings stored — no raw images, ever |
 | Art. 5(1)(e) | Storage Limitation | Captured frames are discarded immediately after processing |
 | Art. 5(1)(f) | Integrity & Confidentiality | AES-256 encryption on all stored biometric data |
-| Art. 17 | Right to Erasure | Full user deletion available directly from the UI |
+| Art. 17 | Right to Erasure | Full user deletion available via the database manager |
 | Art. 32 | Security of Processing | 100% local processing — no network calls, no cloud |
 
 ---
@@ -113,7 +117,7 @@ FaceLock is designed around the principle that **biometric data should never lea
 | Layer | Technology |
 |---|---|
 | Language | Python 3.11 |
-| UI | Streamlit |
+| Interface | CLI + OpenCV window + `run.bat` launcher |
 | Face Detection & Recognition | `face_recognition` (dlib) |
 | Encryption | `cryptography` — Fernet / AES-256 |
 | Database | SQLite3 (built-in) |
@@ -154,11 +158,22 @@ pip install -r requirements.txt
 
 ### Run
 
+**Using the batch launcher:**
+
 ```bash
-streamlit run app.py
+run.bat enroll student_user    # Enroll your face
+run.bat start  student_user    # Start the guardian loop
+run.bat auth   student_user    # Test authentication
+run.bat users                  # List enrolled users
 ```
 
-The app opens at **`http://localhost:8501`**.
+**Or directly with Python:**
+
+```bash
+python enroll.py --user student_user       # Step 1: Enroll
+python facelock.py --user student_user     # Step 2: Start guardian loop
+python authenticate.py --user student_user # Optional: Test auth separately
+```
 
 On first launch, `data/facelock.db` and `data/facelock.key` are created automatically.
 
@@ -166,14 +181,29 @@ On first launch, `data/facelock.db` and `data/facelock.key` are created automati
 
 ## Usage
 
-| Page | Action |
+| Command | Action |
 |---|---|
-| 📸 **Enroll Face** | Capture your face to register in the database |
-| 🔓 **Authenticate** | Verify your identity to unlock the session |
-| 🔒 **Lock Session** | Manually lock Windows or view auto-lock countdown |
-| ⚙️ **Settings** | Adjust recognition threshold and inactivity timeout |
-| 📜 **Audit Logs** | View all authentication events |
-| 👥 **Users** | Manage enrolled users (including full deletion) |
+| 📸 `enroll.py --user <name>` | Capture your face and register in the encrypted database |
+| 👁️ `facelock.py --user <name>` | Start the guardian loop — locks on absence or wrong face |
+| 🔓 `authenticate.py --user <name>` | Verify your identity against the stored embedding |
+| 🔇 `facelock.py --user <name> --silent` | Run guardian loop without the webcam preview window |
+| 👥 `run.bat users` | List all enrolled users |
+
+---
+
+## Configuration
+
+All settings are centralized in `config.py`:
+
+| Setting | Default | Description |
+|---|---|---|
+| `MATCH_THRESHOLD` | `0.45` | Cosine distance threshold — lower = stricter matching |
+| `NO_FACE_TIMEOUT` | `5` | Seconds without a face before auto-lock |
+| `WRONG_FACE_LIMIT` | `30` | Consecutive wrong-face frames before lock |
+| `ENROLLMENT_FRAMES` | `5` | Number of frames averaged during enrollment |
+| `AUTH_CORRECT_NEEDED` | `10` | Consecutive correct frames needed to authenticate |
+| `POLL_INTERVAL_MS` | `100` | Milliseconds between webcam frames (10 fps) |
+| `SHOW_WINDOW` | `True` | Show/hide live webcam preview window |
 
 ---
 
@@ -182,7 +212,7 @@ On first launch, `data/facelock.db` and `data/facelock.key` are created automati
 - `data/facelock.key` is your encryption key — **never commit it to version control**
 - `data/facelock.db` contains encrypted biometric data — **keep it local**
 - Both files are excluded via `.gitignore` by default
-- Deleting a user from the UI permanently removes all associated data (GDPR Art. 17)
+- Deleting a user permanently removes all associated data (GDPR Art. 17)
 
 ---
 
