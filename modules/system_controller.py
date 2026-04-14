@@ -12,6 +12,7 @@ import time
 import ctypes.wintypes
 from datetime import datetime
 from modules.database import DatabaseManager
+from config import NO_FACE_TIMEOUT
 
 
 class LASTINPUTINFO(ctypes.Structure):
@@ -31,7 +32,7 @@ class SystemController:
         controller.stop()    # stops background thread
     """
 
-    def __init__(self, db: DatabaseManager = None, inactivity_timeout: int = 60):
+    def __init__(self, db: DatabaseManager = None, inactivity_timeout: int = NO_FACE_TIMEOUT):
         self.db                 = db or DatabaseManager()
         self.inactivity_timeout = inactivity_timeout
         self._running           = False

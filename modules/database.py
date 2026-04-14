@@ -13,8 +13,7 @@ import numpy as np
 from datetime import datetime
 from cryptography.fernet import Fernet
 
-DB_PATH  = "data/facelock.db"
-KEY_PATH = "data/facelock.key"
+from config import DB_PATH, KEY_PATH
 
 
 # -- Key Management ------------------------------------------------------------
@@ -114,10 +113,14 @@ class DatabaseManager:
 
     # -- Retrieval -------------------------------------------------------------
 
-    def get_embedding(self, user_id: str) -> np.ndarray | None:
+    def store_embedding(self, username: str, embedding: np.ndarray) -> bool:
+        """Alias for enroll_user — stores encrypted embedding."""
+        return self.enroll_user(username, embedding)
+
+    def get_embedding(self, user_id: str) -> np.ndarray:
         """
         Retrieve and decrypt the stored embedding for a user.
-        Returns numpy array or None if user not found.
+        Raises FileNotFoundError if user not found.
         """
         with self._connect() as conn:
             row = conn.execute("""
@@ -125,7 +128,7 @@ class DatabaseManager:
             """, (user_id,)).fetchone()
 
         if row is None:
-            return None
+            raise FileNotFoundError(f"No embedding found for user '{user_id}'")
 
         decrypted = self.cipher.decrypt(row[0])
         return pickle.loads(decrypted)
