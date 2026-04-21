@@ -13,14 +13,14 @@ import numpy as np
 from datetime import datetime
 from cryptography.fernet import Fernet
 
-from config import DB_PATH, KEY_PATH
+from config import DB_PATH, KEY_PATH, LOG_PATH
 
 
 # -- Key Management ------------------------------------------------------------
 
 def _load_or_create_key() -> bytes:
     """Load the AES key from disk, or generate and save a new one."""
-    os.makedirs("data", exist_ok=True)
+    os.makedirs(os.path.dirname(KEY_PATH), exist_ok=True)
     if not os.path.exists(KEY_PATH):
         key = Fernet.generate_key()
         with open(KEY_PATH, "wb") as f:
@@ -42,7 +42,8 @@ class DatabaseManager:
     """
 
     def __init__(self):
-        os.makedirs("data", exist_ok=True)
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
         self.db_path = DB_PATH
         self.cipher  = _get_cipher()
         self.create_tables()

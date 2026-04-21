@@ -6,10 +6,14 @@ Edit this file to change all system-wide settings.
 No other file should contain hardcoded paths or values.
 """
 
+from pathlib import Path
+
+_ROOT = Path(__file__).parent
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
-DB_PATH             = "data/facelock.db"
-KEY_PATH            = "data/facelock.key"
-LOG_PATH            = "logs/facelock.log"
+DB_PATH             = str(_ROOT / "data" / "facelock.db")
+KEY_PATH            = str(_ROOT / "data" / "facelock.key")
+LOG_PATH            = str(_ROOT / "logs" / "facelock.log")
 
 # ── Face Recognition ──────────────────────────────────────────────────────────
 MATCH_THRESHOLD     = 0.45     # Cosine distance — lower = stricter match

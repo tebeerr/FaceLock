@@ -1,15 +1,15 @@
 <div align="center">
 
-# 🔐 FaceLock
+# FaceLock
+
 ### Biometric Authentication System for Windows
 
-**Local face recognition that locks and unlocks your Windows session — privately, securely, and entirely on-device.**
+**Local face recognition that guards your Windows session — privately, securely, and entirely on-device.**
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)
-![CLI](https://img.shields.io/badge/Interface-CLI-black?logo=windowsterminal)
-![SQLite](https://img.shields.io/badge/Database-SQLite-lightblue?logo=sqlite)
-![AES-256](https://img.shields.io/badge/Encryption-AES--256-green?logo=letsencrypt)
-![GDPR](https://img.shields.io/badge/Compliance-GDPR-orange)
+![AES-256-GCM](https://img.shields.io/badge/Encryption-AES--256--GCM-green?logo=letsencrypt)
+![Tests](https://img.shields.io/badge/Tests-44%20passed-brightgreen?logo=pytest)
+![GDPR](https://img.shields.io/badge/Compliance-GDPR%20%7C%20AI%20Act%20%7C%20ISO%2030107--3-orange)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue?logo=windows)
 
 </div>
@@ -18,110 +18,81 @@
 
 ## What is FaceLock?
 
-FaceLock is a Python application that replaces traditional password-based screen locking with real-time facial recognition. It runs locally on your Windows machine — no cloud, no external servers, no raw image storage.
+FaceLock is a Python application that replaces password-based screen locking with real-time facial recognition. It runs **100% locally** — no cloud, no external servers, no raw image storage.
 
-Face embeddings are extracted, encrypted with AES-256, and stored in a local SQLite database. A **guardian loop** continuously monitors the webcam and automatically locks the session when the enrolled user is no longer detected — or when an unrecognized face appears.
+Face embeddings are extracted from the webcam, encrypted with **AES-256-GCM**, and stored in a local SQLite database. A **guardian loop** continuously monitors who is at the screen and locks the Windows session when the enrolled user is absent or an unrecognised face appears.
 
-> Inspired by privacy-first research initiatives such as **FACEOFF** and **Keyless**, FaceLock is built with **Privacy by Design** principles from the ground up.
-
----
-
-## How It Works
-
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────────┐
-│   Webcam    │────▶│  Face Detection  │────▶│  128D Embedding     │
-│   Capture   │     │  (dlib / OpenCV) │     │  Extraction         │
-└─────────────┘     └──────────────────┘     └──────────┬──────────┘
-                                                         │
-                    ┌──────────────────┐                 ▼
-                    │  Windows Session │     ┌─────────────────────┐
-                    │  Lock / Unlock   │◀────│  AES-256 Encrypted  │
-                    │  (ctypes API)    │     │  SQLite Database    │
-                    └──────────────────┘     └─────────────────────┘
-```
-
-### 1 · Enrollment (`enroll.py`)
-The user captures their face via webcam. FaceLock extracts **5 frames** (configurable), averages them into a single **128-dimensional face embedding**, encrypts it with **AES-256 (Fernet)**, and stores it in a local SQLite database. No raw images are ever saved.
-
-### 2 · Guardian Loop (`facelock.py`)
-The core of the system. A real-time webcam loop monitors who is sitting at the computer:
-- **No face detected** for 5 seconds → session locks automatically
-- **Wrong face detected** for 30 consecutive frames → session locks immediately
-- **Correct face detected** → session stays active with a live confidence overlay
-
-### 3 · Authentication (`authenticate.py`)
-To verify identity (e.g., after unlocking), the user presents their face. FaceLock requires **10 consecutive matching frames** before confirming identity — preventing spoofing from a single lucky frame.
-
-### 4 · Audit Logging
-Every event — enrollment, authentication attempt, guardian start/stop, and lock — is recorded in the SQLite database with timestamps for full traceability.
+The system is built around a clean **domain → application → infrastructure** architecture, with full audit logging, RBAC roles, tamper-evident log signing, and biometric evaluation metrics (FAR/FRR/EER).
 
 ---
 
-## Features
-
-| Feature | Description |
-|---|---|
-| 🔒 **AES-256 Encryption** | All face embeddings are encrypted before being written to disk |
-| 🗄️ **SQLite Database** | Users, embeddings, and logs stored in a single local file |
-| 👁️ **Guardian Loop** | Real-time webcam monitoring — locks on absence or unrecognized face |
-| 🛡️ **GDPR Compliant** | No images stored, right to erasure, 100% local processing |
-| 🎯 **Adjustable Threshold** | Tune recognition strictness via `config.py` |
-| 👥 **Multi-User Support** | Enroll, authenticate, and delete users via CLI |
-| 📜 **Audit Trail** | Timestamped event log for every authentication action |
-| 🖥️ **CLI + Batch Launcher** | Lightweight command-line interface with `run.bat` for quick access |
-
----
-
-## Project Structure
+## Architecture
 
 ```
 FaceLock/
-├── facelock.py               # Guardian loop — real-time webcam monitor (entry point)
-├── enroll.py                 # Face enrollment script
-├── authenticate.py           # Face authentication script
-├── config.py                 # Centralized settings (thresholds, timeouts, paths)
-├── run.bat                   # Windows batch launcher
-├── requirements.txt
+├── domain/                      # Pure entities and repository interfaces
+│   ├── entities.py              #   User, FaceEmbedding, AuthResult, AuditEvent, Role
+│   └── repositories.py          #   Abstract contracts (ABCs)
 │
-├── modules/
-│   ├── __init__.py
-│   ├── database.py           # SQLite + AES-256 encryption layer
-│   └── system_controller.py  # Inactivity monitor + session lock via Windows API
+├── application/                 # Business logic — no I/O, no framework deps
+│   ├── enroll_usecase.py
+│   ├── authenticate_usecase.py
+│   └── guardian_usecase.py
 │
-├── data/                     # Auto-created on first launch
-│   ├── facelock.db           # Encrypted SQLite database
-│   └── facelock.key          # AES-256 key (never commit this)
+├── infrastructure/              # Concrete implementations
+│   ├── crypto.py                #   AES-256-GCM encrypt / decrypt
+│   ├── repositories.py          #   SQLite + RBAC + HMAC-signed audit logs
+│   └── session.py               #   Windows session lock via ctypes
 │
-└── logs/                     # Auto-created on first launch
+├── evaluation/                  # Biometric performance metrics
+│   ├── metrics.py               #   FAR, FRR, EER computation
+│   └── evaluate.py              #   Live webcam evaluation runner
+│
+├── oversight/                   # AI Act Art.14 — human oversight
+│   └── dashboard.py             #   Dashboard, alert detection, log verify, manual lock
+│
+├── tests/
+│   ├── unit/                    #   test_crypto, test_metrics, test_repositories
+│   └── integration/             #   test_enroll_auth (full pipeline, no webcam)
+│
+├── report/
+│   ├── privacy_by_design.md     #   GDPR Art.25 compliance statement
+│   ├── dpia.md                  #   Data Protection Impact Assessment
+│   ├── ai_act_mapping.md        #   EU AI Act Article mapping
+│   └── iso_mapping.md           #   ISO 27001 + ISO 30107-3 + ISO 24745
+│
+├── enroll.py                    # CLI adapter — enrollment
+├── authenticate.py              # CLI adapter — authentication
+├── facelock.py                  # CLI adapter — guardian loop
+├── config.py                    # Centralised settings
+├── migrate_key.py               # One-time Fernet → AES-256-GCM migration
+└── run.bat                      # Windows batch launcher
+```
+
+### Data flow
+
+```
+Webcam → face_recognition (dlib ResNet) → 128-D embedding
+                                                │
+                                    AES-256-GCM encrypt
+                                                │
+                                        SQLite (facelock.db)
+                                                │
+                          HMAC-SHA256 signed audit log entry
 ```
 
 ---
 
-## Privacy & GDPR Compliance
+## Security Model
 
-FaceLock is designed around the principle that **biometric data should never leave the user's device**.
-
-| GDPR Article | Principle | Implementation |
+| Layer | Technology | Detail |
 |---|---|---|
-| Art. 5(1)(c) | Data Minimisation | Only 128D embeddings stored — no raw images, ever |
-| Art. 5(1)(e) | Storage Limitation | Captured frames are discarded immediately after processing |
-| Art. 5(1)(f) | Integrity & Confidentiality | AES-256 encryption on all stored biometric data |
-| Art. 17 | Right to Erasure | Full user deletion available via the database manager |
-| Art. 32 | Security of Processing | 100% local processing — no network calls, no cloud |
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Language | Python 3.11 |
-| Interface | CLI + OpenCV window + `run.bat` launcher |
-| Face Detection & Recognition | `face_recognition` (dlib) |
-| Encryption | `cryptography` — Fernet / AES-256 |
-| Database | SQLite3 (built-in) |
-| Session Control | Windows API via `ctypes` |
+| Embedding encryption | AES-256-GCM | 32-byte key, 12-byte random nonce per write, GCM authentication tag |
+| Audit log integrity | HMAC-SHA256 | Every log entry signed; verifiable via `oversight --verify` |
+| Access control | RBAC | Three roles: `admin`, `user`, `readonly` |
+| Key storage | Separate file | `data/facelock.key` — separate from `data/facelock.db` |
+| Image retention | None | Frames discarded after embedding extraction (`STORE_RAW_IMAGES = False`) |
+| Network | None | Zero outbound connections (`CLOUD_UPLOAD = False`) |
 
 ---
 
@@ -131,17 +102,17 @@ FaceLock is designed around the principle that **biometric data should never lea
 
 - Windows 10 or 11 (64-bit)
 - Python 3.11
-- A webcam (built-in or USB)
-- Visual Studio Build Tools (required for `dlib`)
+- Webcam (built-in or USB)
+- Visual Studio Build Tools (required by `dlib`)
 
 ### Installation
 
 ```bash
-# Clone the repository
+# Clone
 git clone https://github.com/tebeerr/FaceLock.git
 cd FaceLock
 
-# Create a virtual environment with Python 3.11
+# Create virtual environment
 py -3.11 -m venv facelock_env
 facelock_env\Scripts\activate
 
@@ -149,87 +120,170 @@ facelock_env\Scripts\activate
 pip install -r requirements.txt
 ```
 
-> ⚠️ If `face_recognition` fails to install, `dlib` needs to be installed first.
-> Use the prebuilt wheel for Python 3.11:
+> **If `face_recognition` fails**, install the prebuilt dlib wheel first:
 > ```bash
 > pip install https://github.com/jloh02/dlib/releases/download/v19.22/dlib-19.22.99-cp311-cp311-win_amd64.whl
 > pip install face_recognition
 > ```
 
-### Run
+### First-time key migration (existing installations only)
 
-**Using the batch launcher:**
-
-```bash
-run.bat enroll student_user    # Enroll your face
-run.bat start  student_user    # Start the guardian loop
-run.bat auth   student_user    # Test authentication
-run.bat users                  # List enrolled users
-```
-
-**Or directly with Python:**
+If you used a previous version of FaceLock (Fernet encryption), run once:
 
 ```bash
-python enroll.py --user student_user       # Step 1: Enroll
-python facelock.py --user student_user     # Step 2: Start guardian loop
-python authenticate.py --user student_user # Optional: Test auth separately
+.\run.bat migrate
 ```
 
-On first launch, `data/facelock.db` and `data/facelock.key` are created automatically.
+This re-encrypts all stored embeddings under AES-256-GCM and backs up the old key.
 
 ---
 
 ## Usage
 
-| Command | Action |
-|---|---|
-| 📸 `enroll.py --user <name>` | Capture your face and register in the encrypted database |
-| 👁️ `facelock.py --user <name>` | Start the guardian loop — locks on absence or wrong face |
-| 🔓 `authenticate.py --user <name>` | Verify your identity against the stored embedding |
-| 🔇 `facelock.py --user <name> --silent` | Run guardian loop without the webcam preview window |
-| 👥 `run.bat users` | List all enrolled users |
+All commands are available through the batch launcher. Run from PowerShell with `.\`:
+
+```powershell
+.\run.bat enroll    <username>          # Enroll a face (add --role admin|user|readonly)
+.\run.bat start     <username>          # Start the guardian loop
+.\run.bat auth      <username>          # Test authentication
+.\run.bat users                         # List all enrolled users and roles
+.\run.bat eval      <username>          # Run FAR/FRR/EER biometric evaluation
+.\run.bat oversight                     # Human oversight dashboard
+.\run.bat oversight --verify            # Verify HMAC integrity of all log entries
+.\run.bat oversight --lock              # Manually lock the workstation
+.\run.bat migrate                       # Upgrade encryption: Fernet → AES-256-GCM
+.\run.bat test                          # Run the full test suite (44 tests)
+```
+
+Or call Python directly:
+
+```bash
+python enroll.py --user alice --role admin
+python facelock.py --user alice --silent
+python authenticate.py --user alice
+python evaluation/evaluate.py --user alice --genuine 20 --imposter 20
+python oversight/dashboard.py --verify
+```
+
+---
+
+## How It Works
+
+### Enrollment
+
+```
+Webcam → 5 frames captured → face_recognition.face_encodings()
+→ 128-D vectors averaged → AES-256-GCM encrypted → SQLite
+→ HMAC-signed audit log entry written
+```
+
+The user sits in front of the webcam. FaceLock captures `ENROLLMENT_FRAMES` (default 5) frames, averages the 128-dimensional embeddings for a stable representation, encrypts the result, and stores it. No raw images are ever written to disk.
+
+### Guardian Loop
+
+The core of the system. Runs continuously while the user is logged in:
+
+- **No face detected** for `NO_FACE_TIMEOUT` seconds (default 5) → session locks
+- **Wrong face** for `WRONG_FACE_LIMIT` consecutive frames (default 30) → session locks immediately
+- **Correct face** → session stays active with live confidence overlay
+
+### Authentication
+
+Requires `AUTH_CORRECT_NEEDED` consecutive matching frames (default 10) before confirming identity. A single lucky frame is never sufficient.
+
+### Biometric Evaluation
+
+```bash
+.\run.bat eval alice
+```
+
+Captures genuine samples (enrolled user) then prompts for an imposter (different person). Computes FAR, FRR, and EER across a 500-point threshold sweep. Results saved to `report/evaluation_results.json`.
+
+### Human Oversight Dashboard
+
+```bash
+.\run.bat oversight
+```
+
+Displays enrolled users, recent auth events, consecutive-failure alerts, and verifies HMAC integrity of all log entries. Satisfies EU AI Act Article 14 (human oversight measures).
 
 ---
 
 ## Configuration
 
-All settings are centralized in `config.py`:
+All settings in `config.py`:
 
 | Setting | Default | Description |
 |---|---|---|
-| `MATCH_THRESHOLD` | `0.45` | Cosine distance threshold — lower = stricter matching |
+| `MATCH_THRESHOLD` | `0.45` | Cosine distance threshold — lower = stricter |
 | `NO_FACE_TIMEOUT` | `5` | Seconds without a face before auto-lock |
 | `WRONG_FACE_LIMIT` | `30` | Consecutive wrong-face frames before lock |
-| `ENROLLMENT_FRAMES` | `5` | Number of frames averaged during enrollment |
-| `AUTH_CORRECT_NEEDED` | `10` | Consecutive correct frames needed to authenticate |
-| `POLL_INTERVAL_MS` | `100` | Milliseconds between webcam frames (10 fps) |
-| `SHOW_WINDOW` | `True` | Show/hide live webcam preview window |
+| `ENROLLMENT_FRAMES` | `5` | Frames averaged during enrollment |
+| `AUTH_CORRECT_NEEDED` | `10` | Consecutive correct frames to confirm identity |
+| `POLL_INTERVAL_MS` | `100` | Webcam polling rate (10 fps) |
+| `SHOW_WINDOW` | `True` | Show live webcam preview |
+
+---
+
+## Testing
+
+```bash
+.\run.bat test
+```
+
+```
+44 passed in 3.24s
+```
+
+| Suite | Tests | Coverage |
+|---|---|---|
+| `tests/unit/test_crypto.py` | 7 | AES-256-GCM roundtrip, nonce randomness, tamper detection, key size validation |
+| `tests/unit/test_metrics.py` | 7 | FAR/FRR/EER correctness, edge cases (perfect/full overlap) |
+| `tests/unit/test_repositories.py` | 17 | CRUD, RBAC, HMAC signing, encryption opacity |
+| `tests/integration/test_enroll_auth.py` | 13 | Full enroll→auth pipeline, imposter rejection, log signing |
+
+No webcam required — integration tests use synthetic 128-D vectors.
+
+---
+
+## Compliance
+
+| Framework | Document | Key claims |
+|---|---|---|
+| GDPR Art. 25 | `report/privacy_by_design.md` | 7 PbD principles; Art. 5, 9, 17, 25, 32 mapping |
+| GDPR Art. 35 | `report/dpia.md` | Full DPIA; risk register; residual risk assessment |
+| EU AI Act | `report/ai_act_mapping.md` | Art. 9, 10, 13, 14, 15 mapping; Art. 5 exclusions |
+| ISO 27001:2022 | `report/iso_mapping.md` | 13 Annex A control mappings |
+| ISO 30107-3:2023 | `report/iso_mapping.md` | PAD Level 2 (temporal frame consistency) |
+| ISO 24745:2022 | `report/iso_mapping.md` | Irreversibility, unlinkability, revocability |
 
 ---
 
 ## Security Notes
 
-- `data/facelock.key` is your encryption key — **never commit it to version control**
+- `data/facelock.key` is your AES-256-GCM key — **never commit it** (excluded by `.gitignore`)
 - `data/facelock.db` contains encrypted biometric data — **keep it local**
-- Both files are excluded via `.gitignore` by default
-- Deleting a user permanently removes all associated data (GDPR Art. 17)
+- Both are OS-permission protected; no application can read them without your user account
+- Delete a user permanently: `python -c "from application.enroll_usecase import EnrollUseCase; ..."`  
+  or re-enroll and overwrite
 
 ---
 
 ## Academic Context
 
-This project was developed as part of a university biometric systems module.
-It demonstrates practical implementation of:
+Developed as part of a university biometric systems module. Demonstrates:
 
-- Computer vision pipelines (detection → alignment → embedding)
-- Biometric template protection (encryption, no raw storage)
-- Windows system integration (session lock via native API)
-- Privacy-by-Design architecture (GDPR-inspired)
+- **Computer vision pipeline** — detection → alignment → 128-D embedding (dlib ResNet)
+- **Layered architecture** — domain / application / infrastructure separation
+- **Biometric template protection** — AES-256-GCM, no raw storage, key separation
+- **Performance evaluation** — FAR, FRR, EER with live genuine and imposter capture
+- **Regulatory compliance** — GDPR, EU AI Act, ISO 27001, ISO 30107-3
+- **Engineering maturity** — 44 automated tests, HMAC-signed audit trail, RBAC
 
 ---
 
 <div align="center">
 
-Built with Python · Secured with AES-256 · Designed for Privacy
+Built with Python · AES-256-GCM · Privacy by Design · 44 tests green
 
 </div>

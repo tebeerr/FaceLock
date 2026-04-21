@@ -1,87 +1,82 @@
 """
-enroll.py
-==========
-FaceLock enrollment script.
-Run once to register your face. No Streamlit needed.
-
+enroll.py — CLI adapter for EnrollUseCase.
 Usage:
     python enroll.py
     python enroll.py --user my_name
+    python enroll.py --user my_name --role admin
 """
+
+import argparse
+import sys
 
 import cv2
 import face_recognition
-import numpy as np
-import argparse
-import sys
-from modules.database import DatabaseManager
-from config import ENROLLMENT_FRAMES, DEFAULT_USER, SHOW_WINDOW
+
+sys.stdout.reconfigure(encoding="utf-8")
+
+from application.enroll_usecase import EnrollUseCase
+from domain.entities import Role
+from infrastructure.repositories import (
+    SQLiteAuditRepository,
+    SQLiteEmbeddingRepository,
+    SQLiteUserRepository,
+)
+from config import DEFAULT_USER, ENROLLMENT_FRAMES, SHOW_WINDOW
 
 
-def enroll_user(username: str) -> bool:
-    """
-    Capture ENROLLMENT_FRAMES face embeddings from webcam,
-    average them, and store the result encrypted in SQLite.
+def enroll_user(username: str, role: Role = Role.USER) -> bool:
+    uc = EnrollUseCase(
+        users=SQLiteUserRepository(),
+        embeddings=SQLiteEmbeddingRepository(),
+        audit=SQLiteAuditRepository(),
+    )
 
-    Returns True on success, False on failure.
-    """
-    db = DatabaseManager()
-
-    if db.is_enrolled(username):
-        print(f"[ENROLL] ⚠️  User '{username}' is already enrolled.")
-        overwrite = input("  Overwrite? (y/N): ").strip().lower()
-        if overwrite != 'y':
+    if uc.is_enrolled(username):
+        print(f"[ENROLL] User '{username}' is already enrolled.")
+        if input("  Overwrite? (y/N): ").strip().lower() != "y":
             print("[ENROLL] Cancelled.")
             return False
-        db.delete_user(username)
-        print(f"[ENROLL] Old profile deleted. Re-enrolling...")
+        uc.delete(username)
+        print("[ENROLL] Old profile deleted. Re-enrolling...")
 
     print(f"\n[ENROLL] Starting enrollment for '{username}'")
-    print(f"[ENROLL] Will capture {ENROLLMENT_FRAMES} frames. Look at the camera.")
-    print(f"[ENROLL] Press Q to cancel.\n")
+    print(f"[ENROLL] Capturing {ENROLLMENT_FRAMES} frames — look at the camera.")
+    print("[ENROLL] Press Q to cancel.\n")
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print("[ENROLL] ❌ Cannot open webcam.")
+        print("[ENROLL] Cannot open webcam.")
         return False
 
-    embeddings_collected = []
-    frame_count = 0
-    attempts = 0
-    MAX_ATTEMPTS = 300  # safety exit after 30 seconds at 10fps
+    collected: list = []
+    attempts        = 0
 
-    while len(embeddings_collected) < ENROLLMENT_FRAMES and attempts < MAX_ATTEMPTS:
+    while len(collected) < ENROLLMENT_FRAMES and attempts < 300:
         ret, frame = cap.read()
         if not ret:
             attempts += 1
             continue
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb       = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         locations = face_recognition.face_locations(rgb)
         encodings = face_recognition.face_encodings(rgb, locations)
 
         if encodings:
-            embeddings_collected.append(encodings[0])
-            frame_count += 1
-            progress = f"  Captured frame {frame_count}/{ENROLLMENT_FRAMES}"
-            print(progress)
-
+            collected.append(encodings[0])
+            print(f"  Captured frame {len(collected)}/{ENROLLMENT_FRAMES}")
             if SHOW_WINDOW:
                 for (top, right, bottom, left) in locations:
                     cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-                label = f"Capturing {frame_count}/{ENROLLMENT_FRAMES}"
-                cv2.putText(frame, label, (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        else:
-            if SHOW_WINDOW:
-                cv2.putText(frame, "No face detected — adjust position", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                cv2.putText(frame, f"Capturing {len(collected)}/{ENROLLMENT_FRAMES}",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        elif SHOW_WINDOW:
+            cv2.putText(frame, "No face detected — adjust position",
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
         if SHOW_WINDOW:
             cv2.imshow(f"FaceLock — Enrollment ({username})", frame)
-            key = cv2.waitKey(100) & 0xFF
-            if key == ord('q') or key == 27:
-                print("\n[ENROLL] Cancelled by user.")
+            if cv2.waitKey(100) & 0xFF in (ord("q"), 27):
+                print("\n[ENROLL] Cancelled.")
                 cap.release()
                 cv2.destroyAllWindows()
                 return False
@@ -91,30 +86,20 @@ def enroll_user(username: str) -> bool:
     cap.release()
     cv2.destroyAllWindows()
 
-    if len(embeddings_collected) < ENROLLMENT_FRAMES:
-        print(f"\n[ENROLL] ❌ Only captured {len(embeddings_collected)} frames. Try again.")
+    if len(collected) < ENROLLMENT_FRAMES:
+        print(f"\n[ENROLL] Only captured {len(collected)} frames. Try again.")
         return False
 
-    # Average all captured embeddings for a stable representation
-    avg_embedding = np.mean(embeddings_collected, axis=0)
-
-    success = db.store_embedding(username, avg_embedding)
-    db.log_event(username, "ENROLLED", success=success)
-
-    if success:
-        print(f"\n[ENROLL] ✅ '{username}' enrolled successfully.")
-        print(f"[ENROLL] Embedding stored encrypted in data/facelock.db")
-        return True
-    else:
-        print(f"\n[ENROLL] ❌ Failed to store embedding.")
-        return False
+    ok = uc.execute(username, collected, role=role)
+    if ok:
+        print(f"\n[ENROLL] '{username}' enrolled successfully (role={role.value}).")
+        print("[ENROLL] Embedding stored with AES-256-GCM encryption.")
+    return ok
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="FaceLock — Enroll a user face")
-    parser.add_argument("--user", default=DEFAULT_USER,
-                        help=f"Username to enroll (default: {DEFAULT_USER})")
+    parser = argparse.ArgumentParser(description="FaceLock — Enroll")
+    parser.add_argument("--user", default=DEFAULT_USER)
+    parser.add_argument("--role", default="user", choices=["admin", "user", "readonly"])
     args = parser.parse_args()
-
-    ok = enroll_user(args.user)
-    sys.exit(0 if ok else 1)
+    sys.exit(0 if enroll_user(args.user, Role(args.role)) else 1)
