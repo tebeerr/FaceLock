@@ -153,17 +153,25 @@ class SQLiteEmbeddingRepository(EmbeddingRepository):
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
+            # Ensure UNIQUE constraint on user_id for existing tables
+            try:
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_embeddings_user_id ON embeddings(user_id)")
+            except sqlite3.OperationalError:
+                pass  # Index already exists or table has duplicates
+            # Ensure UNIQUE constraint on user_id for existing tables
+            try:
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_embeddings_user_id ON embeddings(user_id)")
+            except sqlite3.OperationalError:
+                pass  # Index already exists or table has duplicates
             conn.commit()
 
     def save(self, embedding: FaceEmbedding) -> None:
         blob = crypto.encrypt(self._key, pickle.dumps(embedding.vector))
         with self._connect() as conn:
+            conn.execute("DELETE FROM embeddings WHERE user_id = ?", (embedding.user_id,))
             conn.execute("""
                 INSERT INTO embeddings (user_id, embedding, created_at)
                 VALUES (?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    embedding=excluded.embedding,
-                    created_at=excluded.created_at
             """, (embedding.user_id, blob, embedding.created_at.isoformat()))
             conn.commit()
 
