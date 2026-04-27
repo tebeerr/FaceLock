@@ -11,6 +11,7 @@
 ![Tests](https://img.shields.io/badge/Tests-44%20passed-brightgreen?logo=pytest)
 ![GDPR](https://img.shields.io/badge/Compliance-GDPR%20%7C%20AI%20Act%20%7C%20ISO%2030107--3-orange)
 ![Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue?logo=windows)
+![Standalone](https://img.shields.io/badge/Standalone-.exe%20via%20PyInstaller-purple?logo=windows)
 
 </div>
 
@@ -21,6 +22,8 @@
 FaceLock is a Python application that replaces password-based screen locking with real-time facial recognition. It runs **100% locally** — no cloud, no external servers, no raw image storage.
 
 Face embeddings are extracted from the webcam, encrypted with **AES-256-GCM**, and stored in a local SQLite database. A **guardian loop** continuously monitors who is at the screen and locks the Windows session when the enrolled user is absent or an unrecognised face appears.
+
+FaceLock also includes a **pre-login guard** (`facelock_guard.py`) — a fullscreen overlay that runs at Windows logon via Task Scheduler. It verifies the user's face before granting desktop access and can be compiled into a **standalone `.exe`** with PyInstaller for zero-dependency deployment.
 
 The system is built around a clean **domain → application → infrastructure** architecture, with full audit logging, RBAC roles, tamper-evident log signing, and biometric evaluation metrics (FAR/FRR/EER).
 
@@ -64,7 +67,9 @@ FaceLock/
 ├── enroll.py                    # CLI adapter — enrollment
 ├── authenticate.py              # CLI adapter — authentication
 ├── facelock.py                  # CLI adapter — guardian loop
-├── config.py                    # Centralised settings
+├── facelock_guard.py            # Pre-login face verification overlay
+├── facelock_guard.spec          # PyInstaller build spec for standalone .exe
+├── config.py                    # Centralised settings (frozen-exe aware)
 ├── migrate_key.py               # One-time Fernet → AES-256-GCM migration
 └── run.bat                      # Windows batch launcher
 ```
@@ -79,6 +84,23 @@ Webcam → face_recognition (dlib ResNet) → 128-D embedding
                                         SQLite (facelock.db)
                                                 │
                           HMAC-SHA256 signed audit log entry
+```
+
+### Guard flow (pre-login)
+
+```
+Windows logon → Task Scheduler → FaceLockGuard.exe
+        │
+        ▼
+Fullscreen overlay blocks desktop
+        │
+        ▼
+Webcam → face match against stored embedding
+        │                           │
+    ✓ Match (5 frames)        ✗ Timeout (10s)
+        │                           │
+  Overlay closes             LockWorkStation()
+  Desktop accessible         → Windows lock screen
 ```
 
 ---
@@ -161,8 +183,16 @@ Or call Python directly:
 python enroll.py --user alice --role admin
 python facelock.py --user alice --silent
 python authenticate.py --user alice
+python facelock_guard.py --user alice          # Pre-login face guard overlay
 python evaluation/evaluate.py --user alice --genuine 20 --imposter 20
 python oversight/dashboard.py --verify
+```
+
+To build and run the standalone guard executable:
+
+```bash
+pyinstaller facelock_guard.spec                # Build .exe to dist/
+dist\FaceLockGuard.exe --user alice            # Run without Python
 ```
 
 ---
@@ -172,20 +202,49 @@ python oversight/dashboard.py --verify
 ### Enrollment
 
 ```
-Webcam → 5 frames captured → face_recognition.face_encodings()
+Webcam → 7 frames captured → face_recognition.face_encodings()
 → 128-D vectors averaged → AES-256-GCM encrypted → SQLite
 → HMAC-signed audit log entry written
 ```
 
-The user sits in front of the webcam. FaceLock captures `ENROLLMENT_FRAMES` (default 5) frames, averages the 128-dimensional embeddings for a stable representation, encrypts the result, and stores it. No raw images are ever written to disk.
+The user sits in front of the webcam. FaceLock captures `ENROLLMENT_FRAMES` (default 7) frames, averages the 128-dimensional embeddings for a more stable representation, encrypts the result, and stores it. No raw images are ever written to disk.
 
 ### Guardian Loop
 
 The core of the system. Runs continuously while the user is logged in:
 
-- **No face detected** for `NO_FACE_TIMEOUT` seconds (default 5) → session locks
-- **Wrong face** for `WRONG_FACE_LIMIT` consecutive frames (default 30) → session locks immediately
+- **No face detected** for `NO_FACE_TIMEOUT` seconds (default 8) → session locks
+- **Wrong face** for `WRONG_FACE_LIMIT` consecutive frames (default 15) → session locks immediately
 - **Correct face** → session stays active with live confidence overlay
+
+### Pre-Login Guard
+
+`facelock_guard.py` is a fullscreen, always-on-top overlay designed to run at Windows logon (before the desktop is accessible):
+
+- **Launches via Task Scheduler** at user logon with 0-second delay
+- **Blocks the desktop** with a dark overlay — intercepts Alt+F4, Alt+Tab, and window close
+- **Scans the webcam** for the enrolled user's face with a live camera feed
+- **On match** (5 consecutive frames) → overlay closes, desktop is accessible
+- **On timeout** (10 seconds with no match) → calls `LockWorkStation()` and returns to the Windows lock screen
+- **Fallback**: user can always press Ctrl+Alt+Del to reach the Windows login screen
+
+```bash
+# Run from source
+python facelock_guard.py --user alice
+
+# Run as standalone exe (no Python required)
+dist\FaceLockGuard.exe --user alice
+```
+
+#### Compiling to Standalone `.exe`
+
+FaceLock Guard can be compiled into a single portable executable using PyInstaller:
+
+```bash
+pyinstaller facelock_guard.spec
+```
+
+The resulting `dist/FaceLockGuard.exe` (~180 MB) bundles Python, OpenCV, dlib, and all dependencies. Copy the `dist/` folder (including `data/` and `logs/`) to any Windows 10/11 machine — no Python installation needed.
 
 ### Authentication
 
@@ -216,9 +275,9 @@ All settings in `config.py`:
 | Setting | Default | Description |
 |---|---|---|
 | `MATCH_THRESHOLD` | `0.45` | Cosine distance threshold — lower = stricter |
-| `NO_FACE_TIMEOUT` | `5` | Seconds without a face before auto-lock |
-| `WRONG_FACE_LIMIT` | `30` | Consecutive wrong-face frames before lock |
-| `ENROLLMENT_FRAMES` | `5` | Frames averaged during enrollment |
+| `NO_FACE_TIMEOUT` | `8` | Seconds without a face before auto-lock |
+| `WRONG_FACE_LIMIT` | `15` | Consecutive wrong-face frames before lock |
+| `ENROLLMENT_FRAMES` | `7` | Frames averaged during enrollment |
 | `AUTH_CORRECT_NEEDED` | `10` | Consecutive correct frames to confirm identity |
 | `POLL_INTERVAL_MS` | `100` | Webcam polling rate (10 fps) |
 | `SHOW_WINDOW` | `True` | Show live webcam preview |
@@ -276,6 +335,7 @@ Developed as part of a university biometric systems module. Demonstrates:
 - **Computer vision pipeline** — detection → alignment → 128-D embedding (dlib ResNet)
 - **Layered architecture** — domain / application / infrastructure separation
 - **Biometric template protection** — AES-256-GCM, no raw storage, key separation
+- **Pre-login authentication** — fullscreen guard overlay with standalone `.exe` deployment
 - **Performance evaluation** — FAR, FRR, EER with live genuine and imposter capture
 - **Regulatory compliance** — GDPR, EU AI Act, ISO 27001, ISO 30107-3
 - **Engineering maturity** — 44 automated tests, HMAC-signed audit trail, RBAC
@@ -284,6 +344,6 @@ Developed as part of a university biometric systems module. Demonstrates:
 
 <div align="center">
 
-Built with Python · AES-256-GCM · Privacy by Design · 44 tests green
+Built with Python · AES-256-GCM · Privacy by Design · Pre-Login Guard · 44 tests green
 
 </div>
