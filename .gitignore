@@ -20,3 +20,8 @@ dlib/
 
 # Logs
 logs/*.log
+
+# PyInstaller
+build/
+dist/
+*.spec

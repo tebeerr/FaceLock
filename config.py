@@ -6,26 +6,32 @@ Edit this file to change all system-wide settings.
 No other file should contain hardcoded paths or values.
 """
 
+import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).parent
+if getattr(sys, 'frozen', False):
+    _ROOT = Path(sys.executable).parent
+else:
+    _ROOT = Path(__file__).parent
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-DB_PATH             = str(_ROOT / "data" / "facelock.db")
-KEY_PATH            = str(_ROOT / "data" / "facelock.key")
-LOG_PATH            = str(_ROOT / "logs" / "facelock.log")
+DATA_DIR            = _ROOT / "data"
+LOGS_DIR            = _ROOT / "logs"
+DB_PATH             = str(DATA_DIR / "facelock.db")
+KEY_PATH            = str(DATA_DIR / "facelock.key")
+LOG_PATH            = str(LOGS_DIR / "facelock.log")
 
 # ── Face Recognition ──────────────────────────────────────────────────────────
 MATCH_THRESHOLD     = 0.45     # Cosine distance — lower = stricter match
                                 # 0.4 = tight (same lighting needed)
                                 # 0.5 = relaxed (works across lighting conditions)
-ENROLLMENT_FRAMES   = 5        # How many frames to average during enrollment
+ENROLLMENT_FRAMES   = 7        # How many frames to average during enrollment
                                 # More frames = more stable embedding
 
 # ── Guardian Loop (facelock.py) ───────────────────────────────────────────────
-NO_FACE_TIMEOUT     = 5        # Seconds without a face before locking
+NO_FACE_TIMEOUT     = 8        # Seconds without a face before locking
                                 # Same concept as teja0508's 8-second timeout
-WRONG_FACE_LIMIT    = 30       # Consecutive wrong-face frames before locking
+WRONG_FACE_LIMIT    = 15       # Consecutive wrong-face frames before locking
                                 # Prevents instant lock on single bad frame
 POLL_INTERVAL_MS    = 100      # Milliseconds between webcam frames (10 fps)
 SHOW_WINDOW         = True     # Show live webcam window during guardian loop
